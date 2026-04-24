@@ -9,6 +9,7 @@
 """
 import asyncio
 import psutil
+import platform
 import logging
 from datetime import datetime
 from typing import Dict, Any, List
@@ -111,13 +112,14 @@ class StatusMonitor:
         """收集系统状态"""
         try:
             system_info = {
-                "hostname": psutil.MacOS if hasattr(psutil, 'MacOS') else "unknown",
-                "platform": psutil.LINUX if hasattr(psutil, 'LINUX') else "unknown",
-                "python_version": psutil.__version__,
+                "hostname": platform.node(),
+                "platform": platform.system(),
+                "platform_version": platform.version(),
+                "python_version": platform.python_version(),
                 "uptime": time.time() - psutil.boot_time(),
                 "timestamp": datetime.now().isoformat()
             }
-            
+
             with self.lock:
                 self.system_status = system_info
         except Exception as e:

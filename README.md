@@ -43,6 +43,7 @@
 | **Summary Agent** | 总结类工作 | 上下文压缩与总结、文章风格特征提取、长文本摘要生成、多文档融合总结 |
 | **Writer Agent** | 文章撰写 | 根据主题和风格撰写文章、按照大纲逐段生成、支持局部重写和润色 |
 | **Review Agent** | 审查文章质量和是否违规 | 内容质量评分、敏感词和违规检测、生成修改建议、提供优化方向 |
+| **Assistant Agent** | 辅助写作 | 文本续写、风格提取、内容改写、润色优化、写作建议、内容扩写与总结 |
 
 ### 核心流程说明
 
@@ -100,12 +101,13 @@ eleven_blog_tunner/
 ├── agents/                  # Agent 层 - AI 智能体
 │   ├── __init__.py
 │   ├── base_agent.py        # Agent 抽象基类
-│   ├── agent_protocol.py    # Agent 通信协议
+│   ├── agent_protocol.py    # Agent 通信协议（集成熔断机制）
 │   ├── boss_agent.py        # Boss Agent (任务调度)
 │   ├── system_agent.py      # System Agent (系统查询)
 │   ├── summary_agent.py     # Summary Agent (总结逻辑)
 │   ├── writer_agent.py      # Writer Agent (文章撰写)
-│   └── review_agent.py      # Review Agent (内容审查)
+│   ├── review_agent.py      # Review Agent (内容审查)
+│   └── assistant_agent.py   # Assistant Agent (辅助写作)
 │
 ├── rag/                     # RAG 层 - 检索增强生成
 │   ├── __init__.py
@@ -130,8 +132,6 @@ eleven_blog_tunner/
 │
 ├── tools/                   # Tools 层 - 工具集
 │   ├── __init__.py
-│   ├── registry.py          # 工具注册中心
-│   ├── agent_caller.py      # Agent 调用器
 │   ├── mcp_tools.py         # MCP 工具集管理
 │   └── skill_manager.py     # Skill 管理器
 │
@@ -227,8 +227,7 @@ gunicorn eleven_blog_tunner.main:app -w 4 -k uvicorn.workers.UvicornWorker
 - ✅ 文档处理 (Markdown/TXT/PDF)
 - ✅ Embedding 服务
 - ✅ 向量检索与重排序
-- ✅ 工具注册中心
-- ✅ Agent 调用器
+- ✅ Agent 熔断机制
 - ✅ 缓存模块
 - ✅ 连接池管理
 - ✅ Agent 间通信协议
@@ -286,12 +285,12 @@ python3 -m eleven_blog_tunner.llm.factory local qwen3.5:9b
 ### 添加新的 Agent
 1. 在 `agents/` 下创建新的 agent 文件
 2. 继承 `BaseAgent` 实现 `execute()`
-3. 在 `AgentCaller` 中注册
+3. 在 `AgentProtocol._init_builtin_agents()` 中注册
 
 ### 添加新的 Tool
-1. 使用 `@tool` 装饰器注册函数
+1. 在 Agent 的 `_init_tools()` 方法中使用 `add_tool()` 注册
 2. 实现具体的工具逻辑
-3. 自动通过 `ToolRegistry` 管理
+3. 通过 `call_tool()` 调用
 
 ## 贡献指南
 

@@ -163,6 +163,7 @@ CREATE TABLE articles (
     review_id UUID,
     published_platform VARCHAR(50),
     published_url VARCHAR(500),
+    metadata JSONB,  -- 存储额外元数据，如错误信息、任务ID等
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),
     published_at TIMESTAMP,

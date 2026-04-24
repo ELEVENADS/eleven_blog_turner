@@ -109,7 +109,7 @@ class Article(Base):
     review_id = Column(UUID(as_uuid=True), index=True)
     published_platform = Column(String(50))
     published_url = Column(String(500))
-    meta_data = Column('metadata', JSON)  # 存储额外元数据，如错误信息、任务ID等
+    meta_data = Column("metadata", JSON)  # 存储额外元数据，如错误信息、任务ID等
     celery_task_id = Column(String(100))  # Celery 任务ID
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

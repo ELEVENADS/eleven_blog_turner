@@ -9,6 +9,8 @@ from enum import Enum
 from datetime import datetime
 import uuid
 import asyncio
+import time
+from collections import defaultdict
 
 
 class MessageType(Enum):
@@ -26,6 +28,151 @@ class TaskStatus(Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+
+
+class CircuitBreakerStatus(Enum):
+    """熔断器状态枚举"""
+    CLOSED = "closed"      # 关闭状态 - 正常服务
+    OPEN = "open"          # 开启状态 - 熔断中
+    HALF_OPEN = "half_open"  # 半开状态 - 试探性服务
+
+
+class CircuitBreaker:
+    """熔断器
+
+    实现熔断机制，当 Agent 连续失败次数超过阈值时，
+    自动熔断该 Agent 一段时间，防止级联故障。
+    """
+
+    def __init__(
+        self,
+        failure_threshold: int = 5,
+        recovery_timeout: int = 30,
+        half_open_max_calls: int = 3
+    ):
+        """初始化熔断器
+
+        Args:
+            failure_threshold: 失败阈值，超过此值触发熔断
+            recovery_timeout: 熔断恢复时间（秒）
+            half_open_max_calls: 半开状态下最大试探调用次数
+        """
+        self.failure_threshold = failure_threshold
+        self.recovery_timeout = recovery_timeout
+        self.half_open_max_calls = half_open_max_calls
+
+        # 状态管理
+        self._status: Dict[str, CircuitBreakerStatus] = defaultdict(
+            lambda: CircuitBreakerStatus.CLOSED
+        )
+        self._failure_counts: Dict[str, int] = defaultdict(int)
+        self._last_failure_time: Dict[str, float] = defaultdict(float)
+        self._half_open_calls: Dict[str, int] = defaultdict(int)
+
+    def get_status(self, agent_name: str) -> CircuitBreakerStatus:
+        """获取 Agent 的熔断状态
+
+        Args:
+            agent_name: Agent 名称
+
+        Returns:
+            熔断状态
+        """
+        status = self._status[agent_name]
+
+        # 检查是否需要从 OPEN 转换为 HALF_OPEN
+        if status == CircuitBreakerStatus.OPEN:
+            last_failure = self._last_failure_time[agent_name]
+            if time.time() - last_failure >= self.recovery_timeout:
+                self._status[agent_name] = CircuitBreakerStatus.HALF_OPEN
+                self._half_open_calls[agent_name] = 0
+                return CircuitBreakerStatus.HALF_OPEN
+
+        return status
+
+    def can_execute(self, agent_name: str) -> bool:
+        """检查是否可以执行 Agent
+
+        Args:
+            agent_name: Agent 名称
+
+        Returns:
+            是否可以执行
+        """
+        status = self.get_status(agent_name)
+
+        if status == CircuitBreakerStatus.CLOSED:
+            return True
+
+        if status == CircuitBreakerStatus.OPEN:
+            return False
+
+        if status == CircuitBreakerStatus.HALF_OPEN:
+            # 半开状态下限制试探调用次数
+            return self._half_open_calls[agent_name] < self.half_open_max_calls
+
+        return True
+
+    def record_success(self, agent_name: str):
+        """记录成功调用
+
+        Args:
+            agent_name: Agent 名称
+        """
+        status = self._status[agent_name]
+
+        if status == CircuitBreakerStatus.HALF_OPEN:
+            self._half_open_calls[agent_name] += 1
+            # 如果半开状态下成功次数达到阈值，关闭熔断器
+            if self._half_open_calls[agent_name] >= self.half_open_max_calls:
+                self._reset(agent_name)
+        else:
+            # 正常状态下重置失败计数
+            self._failure_counts[agent_name] = 0
+
+    def record_failure(self, agent_name: str):
+        """记录失败调用
+
+        Args:
+            agent_name: Agent 名称
+        """
+        status = self._status[agent_name]
+        self._failure_counts[agent_name] += 1
+        self._last_failure_time[agent_name] = time.time()
+
+        if status == CircuitBreakerStatus.HALF_OPEN:
+            # 半开状态下失败，重新熔断
+            self._status[agent_name] = CircuitBreakerStatus.OPEN
+        elif self._failure_counts[agent_name] >= self.failure_threshold:
+            # 达到失败阈值，开启熔断
+            self._status[agent_name] = CircuitBreakerStatus.OPEN
+
+    def _reset(self, agent_name: str):
+        """重置熔断器状态
+
+        Args:
+            agent_name: Agent 名称
+        """
+        self._status[agent_name] = CircuitBreakerStatus.CLOSED
+        self._failure_counts[agent_name] = 0
+        self._half_open_calls[agent_name] = 0
+        self._last_failure_time[agent_name] = 0
+
+    def get_stats(self, agent_name: str) -> Dict[str, Any]:
+        """获取熔断器统计信息
+
+        Args:
+            agent_name: Agent 名称
+
+        Returns:
+            统计信息
+        """
+        return {
+            "status": self._status[agent_name].value,
+            "failure_count": self._failure_counts[agent_name],
+            "last_failure_time": self._last_failure_time[agent_name],
+            "half_open_calls": self._half_open_calls[agent_name]
+        }
 
 
 class AgentMessage(BaseModel):
@@ -200,10 +347,34 @@ class AgentProtocol:
     """Agent 通信协议
 
     定义 Agent 之间的标准通信接口和流程。
+    集成熔断机制，防止 Agent 故障导致级联失败。
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        enable_circuit_breaker: bool = True,
+        failure_threshold: int = 5,
+        recovery_timeout: int = 30
+    ):
+        """初始化 AgentProtocol
+
+        Args:
+            enable_circuit_breaker: 是否启用熔断机制
+            failure_threshold: 熔断失败阈值
+            recovery_timeout: 熔断恢复时间（秒）
+        """
         self.call_chain = AgentCallChain()
+        self.enable_circuit_breaker = enable_circuit_breaker
+
+        # 初始化熔断器
+        if enable_circuit_breaker:
+            self.circuit_breaker = CircuitBreaker(
+                failure_threshold=failure_threshold,
+                recovery_timeout=recovery_timeout
+            )
+        else:
+            self.circuit_breaker = None
+
         self._init_builtin_agents()
 
     def _init_builtin_agents(self):
@@ -260,6 +431,9 @@ class AgentProtocol:
 
         Returns:
             任务结果
+
+        Raises:
+            CircuitBreakerOpenError: 当 Agent 处于熔断状态时抛出
         """
         if agent_sequence is None:
             agent_sequence = [
@@ -277,6 +451,16 @@ class AgentProtocol:
         writer_result = None
 
         for agent_name in agent_sequence:
+            # 检查熔断状态
+            if self.enable_circuit_breaker and not self.circuit_breaker.can_execute(agent_name):
+                error_msg = f"Agent {agent_name} 当前处于熔断状态，暂时不可用"
+                self.call_chain.update_task_status(
+                    task_context.task_id,
+                    TaskStatus.FAILED,
+                    error=error_msg
+                )
+                raise CircuitBreakerOpenError(error_msg)
+
             agent = self.get_agent(agent_name)
             if not agent:
                 self.call_chain.update_task_status(
@@ -300,11 +484,20 @@ class AgentProtocol:
                     user_input=current_input
                 )
                 current_input = await agent.execute(context)
-                
+
+                # 记录成功
+                if self.enable_circuit_breaker:
+                    self.circuit_breaker.record_success(agent_name)
+
                 # 保存 WriterAgent 的结果
                 if agent_name == "WriterAgent":
                     writer_result = current_input
+
             except Exception as e:
+                # 记录失败
+                if self.enable_circuit_breaker:
+                    self.circuit_breaker.record_failure(agent_name)
+
                 self.call_chain.update_task_status(
                     task_context.task_id,
                     TaskStatus.FAILED,
@@ -314,7 +507,7 @@ class AgentProtocol:
 
         # 对于文章生成任务，返回 WriterAgent 的结果
         final_result = writer_result if writer_result else current_input
-        
+
         self.call_chain.update_task_status(
             task_context.task_id,
             TaskStatus.COMPLETED,
@@ -339,6 +532,15 @@ class AgentProtocol:
         Returns:
             调用结果
         """
+        # 检查熔断状态
+        if self.enable_circuit_breaker and not self.circuit_breaker.can_execute(callee):
+            return {
+                "success": False,
+                "error": f"Agent {callee} 当前处于熔断状态，暂时不可用",
+                "callee": callee,
+                "circuit_breaker": self.circuit_breaker.get_stats(callee)
+            }
+
         agent = self.get_agent(callee)
         if not agent:
             return {
@@ -348,17 +550,64 @@ class AgentProtocol:
 
         try:
             result = await agent.execute(input_data)
+
+            # 记录成功
+            if self.enable_circuit_breaker:
+                self.circuit_breaker.record_success(callee)
+
             return {
                 "success": True,
                 "result": result,
                 "callee": callee
             }
         except Exception as e:
+            # 记录失败
+            if self.enable_circuit_breaker:
+                self.circuit_breaker.record_failure(callee)
+
             return {
                 "success": False,
                 "error": str(e),
                 "callee": callee
             }
+
+    def get_circuit_breaker_stats(self, agent_name: Optional[str] = None) -> Dict[str, Any]:
+        """获取熔断器统计信息
+
+        Args:
+            agent_name: Agent 名称，不指定则返回所有 Agent 的统计
+
+        Returns:
+            熔断器统计信息
+        """
+        if not self.enable_circuit_breaker:
+            return {"enabled": False}
+
+        if agent_name:
+            return {
+                "enabled": True,
+                "agent": agent_name,
+                "stats": self.circuit_breaker.get_stats(agent_name)
+            }
+
+        # 返回所有已注册 Agent 的统计
+        all_stats = {}
+        for name in self.call_chain.agents.keys():
+            all_stats[name] = self.circuit_breaker.get_stats(name)
+
+        return {
+            "enabled": True,
+            "agents": all_stats
+        }
+
+    def reset_circuit_breaker(self, agent_name: str):
+        """手动重置熔断器
+
+        Args:
+            agent_name: Agent 名称
+        """
+        if self.enable_circuit_breaker:
+            self.circuit_breaker._reset(agent_name)
 
     def get_task_context(self, task_id: str) -> Optional[TaskContext]:
         """获取任务上下文
@@ -380,17 +629,38 @@ class AgentProtocol:
         return self.call_chain.call_history
 
 
+class CircuitBreakerOpenError(Exception):
+    """熔断器开启异常
+
+    当 Agent 处于熔断状态时抛出此异常。
+    """
+    pass
+
+
 # 全局协议实例
 _global_protocol: Optional[AgentProtocol] = None
 
 
-def get_protocol() -> AgentProtocol:
+def get_protocol(
+    enable_circuit_breaker: bool = True,
+    failure_threshold: int = 5,
+    recovery_timeout: int = 30
+) -> AgentProtocol:
     """获取全局协议实例
+
+    Args:
+        enable_circuit_breaker: 是否启用熔断机制
+        failure_threshold: 熔断失败阈值
+        recovery_timeout: 熔断恢复时间（秒）
 
     Returns:
         AgentProtocol 实例
     """
     global _global_protocol
     if _global_protocol is None:
-        _global_protocol = AgentProtocol()
+        _global_protocol = AgentProtocol(
+            enable_circuit_breaker=enable_circuit_breaker,
+            failure_threshold=failure_threshold,
+            recovery_timeout=recovery_timeout
+        )
     return _global_protocol
