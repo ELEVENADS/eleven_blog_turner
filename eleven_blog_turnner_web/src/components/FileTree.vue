@@ -1,6 +1,6 @@
 <template>
-  <t-card 
-    class="file-tree-card" 
+  <t-card
+    class="file-tree-card"
     :bordered="false"
   >
     <!-- 自定义头部 -->
@@ -19,11 +19,10 @@
           </template>
         </t-input>
         <t-dropdown :options="createOptions" @click="handleCreateAction">
-          <t-button variant="outline" size="small">
+          <t-button variant="outline">
             <template #icon>
-              <t-icon name="add-plus" />
+              <t-icon name="plus" />
             </template>
-            
           </t-button>
         </t-dropdown>
       </div>
@@ -57,8 +56,8 @@
           <div class="tree-node-label">
             <span>{{ (getRealNodeData(node) as TreeNode).label }}</span>
             <!-- 三点按钮 -->
-            <div 
-              v-if="(getRealNodeData(node) as TreeNode).type !== 'root'" 
+            <div
+              v-if="(getRealNodeData(node) as TreeNode).type !== 'root'"
               class="custom-dropdown"
             >
               <t-button
@@ -75,7 +74,6 @@
       </t-tree>
     </div>
 
-    <t-empty v-if="fileTreeData.length === 0 && !loading" />
 
     <!-- 新建文件夹弹窗 -->
     <t-dialog v-model:visible="showFolderDialog" header="新建文件夹" :footer="false" width="400px">
@@ -121,10 +119,10 @@
       </t-form>
     </t-dialog>
   </t-card>
-  
+
   <!-- 全局下拉菜单（最外层） -->
-  <div 
-    v-if="menuVisible && currentMenuNode" 
+  <div
+    v-if="menuVisible && currentMenuNode"
     class="global-dropdown-menu"
     :style="{ position: 'fixed', top: menuY + 'px', left: menuX + 'px', zIndex: 999999 }"
   >
@@ -237,15 +235,15 @@ const getRealNodeData = (node: any): TreeNode => {
   if (node['__tdesign_tree-node__']) {
     tdesignNode = node['__tdesign_tree-node__']
   }
-  
+
   if (tdesignNode && tdesignNode.data) {
     return tdesignNode.data
   }
-  
+
   if (node.data) {
     return node.data
   }
-  
+
   return node
 }
 
@@ -259,12 +257,12 @@ const getNodeKey = (node: any): string => {
 const handleMenuClick = (event: MouseEvent, node: any) => {
   const realNode = getRealNodeData(node)
   console.log('点击三点按钮 - 节点:', realNode.label, '节点类型:', realNode.type)
-  
+
   const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
-  
+
   menuX.value = rect.left
   menuY.value = rect.bottom + 4
-  
+
   currentMenuNode.value = node
   menuVisible.value = true
 }
@@ -273,10 +271,10 @@ const handleMenuClick = (event: MouseEvent, node: any) => {
 const handleMenuItemClick = (operation: NodeOperation) => {
   const realNode = getRealNodeData(currentMenuNode.value)
   console.log('点击菜单项 - 操作:', operation.content, '节点:', realNode.label)
-  
+
   menuVisible.value = false
   currentMenuNode.value = null
-  
+
   handleNodeOperation(operation, realNode)
 }
 
@@ -579,7 +577,7 @@ const handleDragLeave = (ctx: any) => {
 
 const handleDrop = async (ctx: any) => {
   console.log('handleDrop - ctx 类型:', Object.keys(ctx))
-  
+
   try {
     const { dragNode, dropNode, dropPosition } = ctx
     const sourceNode = dragNode?.data || dragNode
@@ -740,6 +738,15 @@ defineExpose({
 
 :deep(.t-tree__list::-webkit-scrollbar) {
   display: none;
+}
+
+/* 数据为空时水平居中显示 */
+:deep(.t-tree__empty) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  width: 100%;
 }
 
 .tree-node-label {

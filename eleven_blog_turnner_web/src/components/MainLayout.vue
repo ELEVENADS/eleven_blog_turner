@@ -326,7 +326,7 @@ document.addEventListener('click', (e) => {
 }
 
 .file-tree {
-  width: 250px;
+  width: 280px;
   background: #fff;
   border-right: 1px solid #e7e7e7;
   overflow: hidden;
